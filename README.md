@@ -13,10 +13,10 @@ Run these commands once to clone the repository and set up your local workspace:
 
 ```bash
 # Clone the repository to your system
-git clone <repository-URL>
+git clone https://github.com/AnirudhDattu/SIH2025.git
 
 # Move into the project folder
-cd <repository-name>
+cd SIH2025
 
 # Verify remote
 git remote -v
