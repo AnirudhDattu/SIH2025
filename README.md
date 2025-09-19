@@ -97,7 +97,3 @@ git merge main
 - Ensure commits are meaningful and concise.
 - Document your code where necessary.
 - If you create empty folders, place a `.gitkeep` file inside them so Git tracks the directory.
-
----
-
-Would you like me to also include a **GitHub Flow diagram** (visual workflow) in your README so your team can instantly grasp the branching/PR process?
