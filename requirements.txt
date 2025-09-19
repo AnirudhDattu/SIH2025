@@ -1,0 +1,9 @@
+# requirements.txt
+
+selenium
+pymongo
+google-cloud-documentai
+google-generativeai
+pyyaml
+python-dotenv
+requests
