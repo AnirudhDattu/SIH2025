@@ -1,6 +1,5 @@
 # main.py
 import os, json
-import time, shutil
 import yaml
 from pathlib import Path
 from dotenv import load_dotenv
@@ -25,15 +24,15 @@ from ocr_data_extractor.gemini_postprocess import process_ocr_to_json
 
 # ---- RAG (we will hot-patch 're' on the module to avoid editing rag.py) ----
 import rag.rag as rag
+import re as _re
+setattr(rag, "re", _re)          # force the module's global 're' to the real regex module
 
 CONFIG_FILE = "config.yaml"
 TEMP_DIR = Path("temp"); TEMP_DIR.mkdir(parents=True, exist_ok=True)
 OCR_OUTPUT_TXT = str(TEMP_DIR / "ocr_output.txt")
 PRODUCT_OUTPUT_JSON = str(TEMP_DIR / "product_output.json")
-COMPLIANCE_OUTPUT_JSON = str(TEMP_DIR / "compliance_output.json")
-
-RULES_STORE_DEFAULT = "./rules_chroma_store"
-RULES_PDF_DEFAULT = "pdfs/Final-Book-Legal-Metrology-with-amendments.pdf"
+RULES_STORE_DEFAULT = "rag/rules_chroma_store"
+RULES_PDF_DEFAULT = "rag/pdfs/Final-Book-Legal-Metrology-with-amendments.pdf"
 
 def _env(key: str, default: str | None = None) -> str | None:
     v = os.getenv(key, default)
@@ -55,6 +54,7 @@ def _get_mongo_collection():
     return client[db_name][coll_name]
 
 def _resolve_rules_pdf(rules_pdf_cfg: str) -> Path:
+    # Try a few reasonable locations to find the PDF
     candidates = [
         Path(rules_pdf_cfg),
         Path.cwd() / rules_pdf_cfg,
@@ -71,7 +71,7 @@ def _resolve_rules_pdf(rules_pdf_cfg: str) -> Path:
 
 def main():
     print("="*60)
-    print("SCRAPE ➜ OCR ➜ GEMINI ➜ RAG COMPLIANCE ➜ FINAL DB WRITE")
+    print("SCRAPE ➜ OCR ➜ GEMINI ➜ RAG COMPLIANCE ➜ FINAL DB WRITE (single write)")
     print("="*60)
 
     cfg = read_config()
@@ -89,12 +89,12 @@ def main():
         raise SystemExit("No images found to OCR.")
     print(f"[main] {len(image_urls)} image URLs found")
 
-    # B) OCR all images → temp/ocr_output.txt (delete temp/ocr_output.json if created)
+    # B) OCR all images → temp/ocr_output.txt (and a JSON file we will delete)
     print("[main] Running OCR on all images…")
     local_paths, ocr_txt_path, ocr_json_path = process_images_to_ocr(CONFIG_FILE, image_urls, OCR_OUTPUT_TXT)
     print(f"[main] OCR written: {ocr_txt_path} / {ocr_json_path}")
 
-    # Remove the per-image OCR JSON artifact (not needed downstream)
+    # Remove the per-image OCR JSON artifact (as requested)
     try:
         p = Path(ocr_json_path)
         if p.exists():
@@ -113,7 +113,7 @@ def main():
         json.dump(product_json, f, ensure_ascii=False, indent=2)
     print(f"[main] product_output.json -> {Path(PRODUCT_OUTPUT_JSON).resolve()}")
 
-    # D) Load/build rules vector DB & run RAG compliance
+    # D) Load/build rules vector DB & run RAG compliance (no edits to rag.py)
     print("[main] Loading rules vector DB…")
     rules_store_path = Path(rules_store)
     if rules_store_path.exists():
@@ -125,11 +125,6 @@ def main():
 
     print("[main] Running RAG compliance check…")
     compliance = rag.check_compliance(vector_db, product_json)
-
-    # Save compliance result locally
-    with open(COMPLIANCE_OUTPUT_JSON, "w", encoding="utf-8") as f:
-        json.dump(compliance, f, ensure_ascii=False, indent=2)
-    print(f"[main] compliance_output.json -> {Path(COMPLIANCE_OUTPUT_JSON).resolve()}")
 
     # E) Single final DB write
     print("[main] Writing final document to MongoDB (single write)…")
@@ -146,15 +141,6 @@ def main():
     }
     res = coll.insert_one(final_doc)
     print(f"[main] ✅ Inserted final document _id: {res.inserted_id}")
-
-    # F) Cleanup temp after 10 seconds
-    print("[main] Waiting 10 seconds before cleaning temp/…")
-    time.sleep(10)
-    try:
-        shutil.rmtree(TEMP_DIR)
-        print(f"[main] Removed temp folder: {TEMP_DIR}")
-    except Exception as e:
-        print(f"[main] Could not remove temp folder: {e}")
 
     print("\n" + "="*60)
     print("PIPELINE COMPLETED ✅")
