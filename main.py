@@ -1,6 +1,9 @@
 # main.py
 import os, json
 import yaml
+import time
+import shutil
+import threading
 from pathlib import Path
 from dotenv import load_dotenv
 from typing import List
@@ -69,6 +72,30 @@ def _resolve_rules_pdf(rules_pdf_cfg: str) -> Path:
         f"Tried:\n  - {tried}"
     )
 
+def cleanup_temp_folder(temp_dir: Path, delay_seconds: int = 30):
+    """
+    Deletes the temp folder after a specified delay.
+    Runs in a separate thread to avoid blocking the main process.
+    """
+    def _cleanup():
+        try:
+            print(f"[cleanup] Waiting {delay_seconds} seconds before cleaning up temp folder...")
+            time.sleep(delay_seconds)
+            
+            if temp_dir.exists():
+                shutil.rmtree(temp_dir)
+                print(f"[cleanup] ✅ Successfully deleted temp folder: {temp_dir}")
+            else:
+                print(f"[cleanup] ⚠️  Temp folder already deleted: {temp_dir}")
+                
+        except Exception as e:
+            print(f"[cleanup] ❌ Error deleting temp folder: {e}")
+    
+    # Start cleanup in background thread
+    cleanup_thread = threading.Thread(target=_cleanup, daemon=True)
+    cleanup_thread.start()
+    print(f"[main] 🧹 Scheduled temp folder cleanup in {delay_seconds} seconds")
+
 def main():
     print("="*60)
     print("SCRAPE ➜ OCR ➜ GEMINI ➜ RAG COMPLIANCE ➜ FINAL DB WRITE (single write)")
@@ -103,15 +130,11 @@ def main():
     except Exception as e:
         print(f"[main] (non-fatal) Could not remove OCR JSON: {e}")
 
-    # C) Gemini post-processing → temp/product_output.json
+    # C) Gemini post-processing → temp/product_output.json (initial version)
     print("[main] Running Gemini post-processing…")
     with open(ocr_txt_path, "r", encoding="utf-8") as f:
         ocr_text = f.read()
     product_json = process_ocr_to_json(CONFIG_FILE, ocr_text, image_urls[0])
-
-    with open(PRODUCT_OUTPUT_JSON, "w", encoding="utf-8") as f:
-        json.dump(product_json, f, ensure_ascii=False, indent=2)
-    print(f"[main] product_output.json -> {Path(PRODUCT_OUTPUT_JSON).resolve()}")
 
     # D) Load/build rules vector DB & run RAG compliance (no edits to rag.py)
     print("[main] Loading rules vector DB…")
@@ -124,7 +147,24 @@ def main():
         vector_db = rag.build_vector_db(str(rules_pdf_path), str(rules_store_path))
 
     print("[main] Running RAG compliance check…")
-    compliance = rag.check_compliance(vector_db, product_json)
+    # Extract only the ocr_data for compliance checking
+    ocr_data_for_compliance = product_json.get("ocr_data", {})
+    compliance = rag.check_compliance(vector_db, ocr_data_for_compliance)
+    
+    # Update the product_json with compliance results
+    from datetime import datetime, timezone
+    product_json["compliance"] = {
+        "score": compliance.get("compliance_score", None),
+        "status": compliance.get("compliance_status", None), 
+        "violations": compliance.get("violations", []),
+        "reasoning": compliance.get("reasoning", None),
+        "analysis_timestamp": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    }
+
+    # Save the complete product_output.json with compliance data
+    with open(PRODUCT_OUTPUT_JSON, "w", encoding="utf-8") as f:
+        json.dump(product_json, f, ensure_ascii=False, indent=2)
+    print(f"[main] product_output.json (with compliance) -> {Path(PRODUCT_OUTPUT_JSON).resolve()}")
 
     # E) Single final DB write
     print("[main] Writing final document to MongoDB (single write)…")
@@ -137,7 +177,7 @@ def main():
         "created_at": product_json.get("created_at"),
         "updated_at": product_json.get("updated_at"),
         "ocr_data": product_json.get("ocr_data", {}),
-        "compliance": compliance
+        "compliance": product_json.get("compliance", {})  # Now uses the updated compliance data
     }
     res = coll.insert_one(final_doc)
     print(f"[main] ✅ Inserted final document _id: {res.inserted_id}")
@@ -145,6 +185,9 @@ def main():
     print("\n" + "="*60)
     print("PIPELINE COMPLETED ✅")
     print("="*60)
+    
+    # Schedule temp folder cleanup after 30 seconds
+    cleanup_temp_folder(TEMP_DIR, delay_seconds=30)
 
 if __name__ == "__main__":
     main()
