@@ -86,8 +86,8 @@ def build_prompt(raw_text: str, image_url: str) -> str:
 You are a strict JSON extractor. Return ONLY valid JSON (no markdown, no prose).
 We provide OCR text from Google Document AI for one packaged food product.
 Extract fields exactly as shown. If a field is missing in the source, set it to null. Do not hallucinate.
-The violations array can be empty if no violations are found or can be multiple too. 
-Do not upload any complaince details or analysis timestamp. they all should be none they will be updated after. 
+The violations array should be empty.
+Do not upload any complaince details or analysis timestamp. they all should be none they will be updated after. please make sure of this
 
 Required JSON shape (keys and nesting must match EXACTLY):
 {{

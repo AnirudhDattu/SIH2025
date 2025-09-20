@@ -1,35 +1,39 @@
 # main.py
-import os
+import os, json
+import time, shutil
 import yaml
+from pathlib import Path
 from dotenv import load_dotenv
 from typing import List
 from pymongo.mongo_client import MongoClient
 from pymongo.server_api import ServerApi
-from bson import ObjectId
-from pathlib import Path
 
+
+# Optional: silence gRPC ALTS info logs
 os.environ["GRPC_VERBOSITY"] = "NONE"
 os.environ["GRPC_LOG_SEVERITY_LEVEL"] = "ERROR"
 
-# Load env first
 load_dotenv()
 
-# 1) scraper step: import your function from the path you’re using
-#    If your package is named "complaince_checker" (typo) keep that import.
-from scraper.scrape_upload_data import run_pipeline as run_scraper_pipeline
+# ---- scraper: we ONLY read image URLs (no DB writes here) ----
+# If your module path is different, adjust the import accordingly.
+from scraper.scrape_upload_data import extract_image_urls
 
-# 2) OCR + postprocess modules (from ocr_data_extractor/)
+# ---- OCR + postprocess ----
 from ocr_data_extractor.image_processor import process_images_to_ocr
 from ocr_data_extractor.gemini_postprocess import process_ocr_to_json
-from ocr_data_extractor.update_mongodb import update_existing_product
+
+# ---- RAG (we will hot-patch 're' on the module to avoid editing rag.py) ----
+import rag.rag as rag
 
 CONFIG_FILE = "config.yaml"
-
-TEMP_DIR = Path("temp")
-TEMP_DIR.mkdir(parents=True, exist_ok=True)
-
+TEMP_DIR = Path("temp"); TEMP_DIR.mkdir(parents=True, exist_ok=True)
 OCR_OUTPUT_TXT = str(TEMP_DIR / "ocr_output.txt")
 PRODUCT_OUTPUT_JSON = str(TEMP_DIR / "product_output.json")
+COMPLIANCE_OUTPUT_JSON = str(TEMP_DIR / "compliance_output.json")
+
+RULES_STORE_DEFAULT = "./rules_chroma_store"
+RULES_PDF_DEFAULT = "pdfs/Final-Book-Legal-Metrology-with-amendments.pdf"
 
 def _env(key: str, default: str | None = None) -> str | None:
     v = os.getenv(key, default)
@@ -37,80 +41,124 @@ def _env(key: str, default: str | None = None) -> str | None:
         v = v[1:-1]
     return v
 
-def read_url_from_config(cfg_path: str = "config.yaml") -> str:
-    with open(cfg_path, "r", encoding="utf-8") as f:
-        cfg = yaml.safe_load(f) or {}
-    url = cfg.get("url")
-    if not url or not isinstance(url, str):
-        raise SystemExit("config.yaml must contain a string key 'url'.")
-    return url
+def read_config(path: str = CONFIG_FILE) -> dict:
+    with open(path, "r", encoding="utf-8") as f:
+        return yaml.safe_load(f) or {}
 
-def get_mongo_doc(object_id: str) -> dict:
-    """Fetch the existing MongoDB document to get image_urls."""
+def _get_mongo_collection():
     uri = _env("MONGODB_URI")
     if not uri:
-        raise SystemExit("MONGODB_URI is not set in env (.env).")
-
+        raise SystemExit("MONGODB_URI is not set in .env")
     db_name = _env("MONGODB_DB", "productdb") or "productdb"
     coll_name = _env("MONGODB_COLLECTION", "products") or "products"
-
     client = MongoClient(uri, server_api=ServerApi("1"))
-    doc = client[db_name][coll_name].find_one({"_id": ObjectId(object_id)})
-    if not doc:
-        raise SystemExit(f"No document found for _id={object_id}")
-    return doc
+    return client[db_name][coll_name]
+
+def _resolve_rules_pdf(rules_pdf_cfg: str) -> Path:
+    candidates = [
+        Path(rules_pdf_cfg),
+        Path.cwd() / rules_pdf_cfg,
+        Path(__file__).parent / rules_pdf_cfg,
+    ]
+    for c in candidates:
+        if c.is_file():
+            return c.resolve()
+    tried = "\n  - ".join(str(p) for p in candidates)
+    raise SystemExit(
+        "Rules PDF not found. Update config.yaml: rules_pdf to a valid path.\n"
+        f"Tried:\n  - {tried}"
+    )
 
 def main():
-    print("=" * 60)
-    print("SCRAPE ➜ OCR (all images) ➜ GEMINI ➜ UPDATE Mongo")
-    print("=" * 60)
+    print("="*60)
+    print("SCRAPE ➜ OCR ➜ GEMINI ➜ RAG COMPLIANCE ➜ FINAL DB WRITE")
+    print("="*60)
 
-    # A) Read URL from config.yaml only
-    url = read_url_from_config(CONFIG_FILE)
-    print(f"[main] Using URL: {url}")
+    cfg = read_config()
+    url = cfg.get("url")
+    if not url:
+        raise SystemExit("config.yaml must contain key: url")
 
-    # B) Run the scraper (inserts initial product doc with image_urls into mongoDB)
-    print("[main] Running scraper to create initial Mongo doc...")
-    object_id = run_scraper_pipeline(url)
-    object_id = str(object_id)  # ensure string
-    print(f"[main] Mongo _id: {object_id}")
+    rules_pdf_cfg = cfg.get("rules_pdf", RULES_PDF_DEFAULT)
+    rules_store = cfg.get("rules_chroma_store", RULES_STORE_DEFAULT)
 
-    # C) Pull the doc back to get image_urls
-    print("[main] Fetching document to get image_urls...")
-    doc = get_mongo_doc(object_id)
-    image_urls: List[str] = doc.get("image_urls") or []
+    # A) Scrape image URLs (NO DB writes here)
+    print("[main] Scraping image URLs…")
+    image_urls: List[str] = extract_image_urls(url)
     if not image_urls:
-        raise SystemExit("No image_urls found in Mongo document; nothing to OCR.")
-    print(f"[main] Found {len(image_urls)} images")
+        raise SystemExit("No images found to OCR.")
+    print(f"[main] {len(image_urls)} image URLs found")
 
-    # D) Download all images + run Document & Form parsing on each
-    print("[main] Running image processor (downloads + Document/Form Parser)...")
-    _, ocr_txt_path = process_images_to_ocr(CONFIG_FILE, image_urls, OCR_OUTPUT_TXT)
-    print(f"[main] OCR text consolidated at: {ocr_txt_path}")
+    # B) OCR all images → temp/ocr_output.txt (delete temp/ocr_output.json if created)
+    print("[main] Running OCR on all images…")
+    local_paths, ocr_txt_path, ocr_json_path = process_images_to_ocr(CONFIG_FILE, image_urls, OCR_OUTPUT_TXT)
+    print(f"[main] OCR written: {ocr_txt_path} / {ocr_json_path}")
 
-    # E) Read OCR content & run Gemini post-processing to JSON
-    print("[main] Running Gemini post-processing...")
+    # Remove the per-image OCR JSON artifact (not needed downstream)
+    try:
+        p = Path(ocr_json_path)
+        if p.exists():
+            p.unlink()
+            print(f"[main] Removed unused OCR JSON: {p}")
+    except Exception as e:
+        print(f"[main] (non-fatal) Could not remove OCR JSON: {e}")
+
+    # C) Gemini post-processing → temp/product_output.json
+    print("[main] Running Gemini post-processing…")
     with open(ocr_txt_path, "r", encoding="utf-8") as f:
         ocr_text = f.read()
-    # pass the first image URL to populate the JSON's image_url field
-    first_image_url = image_urls[0]
-    result_json = process_ocr_to_json(CONFIG_FILE, ocr_text, first_image_url)
+    product_json = process_ocr_to_json(CONFIG_FILE, ocr_text, image_urls[0])
 
-    # F) Save product_output.json locally
-    print("[main] Saving product_output.json...")
-    import json
     with open(PRODUCT_OUTPUT_JSON, "w", encoding="utf-8") as f:
-        json.dump(result_json, f, ensure_ascii=False, indent=2)
-    print(f"[main] Saved JSON at: {os.path.abspath(PRODUCT_OUTPUT_JSON)}")
+        json.dump(product_json, f, ensure_ascii=False, indent=2)
+    print(f"[main] product_output.json -> {Path(PRODUCT_OUTPUT_JSON).resolve()}")
 
-    # G) Update the same MongoDB object with this JSON and set status=ocr_uploaded
-    print("[main] Updating MongoDB existing document...")
-    update_res = update_existing_product(PRODUCT_OUTPUT_JSON, object_id)
-    print(f"[main] Update result: {update_res}")
+    # D) Load/build rules vector DB & run RAG compliance
+    print("[main] Loading rules vector DB…")
+    rules_store_path = Path(rules_store)
+    if rules_store_path.exists():
+        vector_db = rag.load_vector_db(str(rules_store_path))
+    else:
+        rules_store_path.mkdir(parents=True, exist_ok=True)
+        rules_pdf_path = _resolve_rules_pdf(rules_pdf_cfg)
+        vector_db = rag.build_vector_db(str(rules_pdf_path), str(rules_store_path))
 
-    print("\n" + "=" * 60)
+    print("[main] Running RAG compliance check…")
+    compliance = rag.check_compliance(vector_db, product_json)
+
+    # Save compliance result locally
+    with open(COMPLIANCE_OUTPUT_JSON, "w", encoding="utf-8") as f:
+        json.dump(compliance, f, ensure_ascii=False, indent=2)
+    print(f"[main] compliance_output.json -> {Path(COMPLIANCE_OUTPUT_JSON).resolve()}")
+
+    # E) Single final DB write
+    print("[main] Writing final document to MongoDB (single write)…")
+    coll = _get_mongo_collection()
+    final_doc = {
+        "product_title": product_json.get("product_title"),
+        "image_urls": image_urls,
+        "product_url": url,
+        "status": "ocr_uploaded",
+        "created_at": product_json.get("created_at"),
+        "updated_at": product_json.get("updated_at"),
+        "ocr_data": product_json.get("ocr_data", {}),
+        "compliance": compliance
+    }
+    res = coll.insert_one(final_doc)
+    print(f"[main] ✅ Inserted final document _id: {res.inserted_id}")
+
+    # F) Cleanup temp after 10 seconds
+    print("[main] Waiting 10 seconds before cleaning temp/…")
+    time.sleep(10)
+    try:
+        shutil.rmtree(TEMP_DIR)
+        print(f"[main] Removed temp folder: {TEMP_DIR}")
+    except Exception as e:
+        print(f"[main] Could not remove temp folder: {e}")
+
+    print("\n" + "="*60)
     print("PIPELINE COMPLETED ✅")
-    print("=" * 60)
+    print("="*60)
 
 if __name__ == "__main__":
     main()
