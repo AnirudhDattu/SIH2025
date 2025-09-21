@@ -25,12 +25,15 @@ SIH2025/
 ├── requirements.txt            # Python dependencies
 ├── config.yaml                 # Configuration file (not tracked)
 ├── .env                        # Environment variables (not tracked)
+├── __init__.py                 # Package initialization
 │
 ├── scraper/                    # Web scraping module
+│   ├── __init__.py            # Package initialization
 │   ├── scrape_upload_data.py  # Selenium-based image scraper
 │   └── object_ids.txt         # Generated MongoDB IDs log
 │
 ├── ocr_data_extractor/        # OCR and data processing
+│   ├── __init__.py            # Package initialization
 │   ├── image_parser.py        # Google Document AI integration
 │   ├── image_processor.py     # Image download and processing
 │   ├── gemini_postprocess.py  # AI-powered data extraction
@@ -39,10 +42,12 @@ SIH2025/
 ├── rag/                       # Compliance checking system
 │   ├── rag.py                 # RAG-based compliance validator
 │   ├── pdfs/                  # Legal Metrology Act documents
-│   │   └── FInal-Book-Legal-Metrology-with-amendments.pdf
+│   │   └── FInal-Book-Legal-Metrology-with-amendments .pdf
 │   └── rules_chroma_store/    # Vector database for legal rules
+│       ├── chroma.sqlite3     # ChromaDB database file
+│       └── [collection_dirs]  # Vector collection directories
 │
-└── temp/                      # Temporary processing files
+└── temp/                      # Temporary processing files (created at runtime)
     ├── ocr_output.txt         # Consolidated OCR results
     └── product_output.json    # Final processed data
 ```
@@ -88,11 +93,12 @@ SIH2025/
 ## 🛠️ Setup Instructions
 
 ### Prerequisites
-- Python 3.8+
+- Python 3.8+ (tested with Python 3.9+)
 - Google Cloud Project with Document AI API enabled
-- MongoDB Atlas account
+- MongoDB Atlas account (or local MongoDB instance)
 - Google Gemini API access
-- Chrome/Chromium browser for Selenium
+- Chrome/Chromium browser for Selenium WebDriver
+- Sufficient storage space for temporary image processing (~500MB recommended)
 
 ### 1. Clone Repository
 ```bash
@@ -104,6 +110,19 @@ cd SIH2025
 ```bash
 pip install -r requirements.txt
 ```
+
+**Key Dependencies:**
+- `selenium` - Web scraping automation
+- `pymongo` - MongoDB database connectivity
+- `google-cloud-documentai` - Google Document AI for OCR
+- `google-generativeai` - Google Gemini API integration
+- `langchain-community` - LangChain framework for RAG
+- `langchain-huggingface` - Hugging Face embeddings
+- `langchain-chroma` - ChromaDB vector database
+- `transformers` - BERT models for document reranking
+- `torch` - PyTorch for machine learning models
+- `sentence-transformers` - Semantic embeddings
+- `chromadb` - Vector database for legal rules storage
 
 ### 3. Environment Configuration
 Create `.env` file with:
@@ -271,25 +290,63 @@ The system validates against these key requirements:
 
 ## 🤝 Contributing
 
-This repository follows standard Git workflow practices:
+This repository welcomes contributions from developers interested in improving legal metrology compliance checking. We follow standard Git workflow practices for clean, collaborative development.
+
+### Quick Start for Contributors
+1. **Fork & Clone**: Fork this repository and clone your fork
+2. **Setup Environment**: Install dependencies and configure your environment (see setup instructions above)
+3. **Create Branch**: Always work on feature branches (`feature/description`, `fix/description`, etc.)
+4. **Develop & Test**: Make your changes and test the complete pipeline
+5. **Submit PR**: Create a detailed pull request for review
 
 ### Development Workflow
-1. **Fork & Clone**: Create your local copy
-2. **Branch**: Always work on feature branches
-3. **Develop**: Make your changes with proper testing
-4. **Test**: Verify your changes don't break existing functionality
-5. **Pull Request**: Submit for review
+- **Fork the repository** to your GitHub account
+- **Clone your fork** and add the original as upstream
+- **Create feature branches** for all changes
+- **Follow conventional commits** (`feat:`, `fix:`, `docs:`, etc.)
+- **Test thoroughly** before submitting PRs
+- **Write clear PR descriptions** with testing instructions
 
 ### Branch Naming Convention
-- `feature/description` - New features
-- `fix/description` - Bug fixes  
-- `docs/description` - Documentation updates
-- `refactor/description` - Code refactoring
+- `feature/description` - New features (e.g., `feature/add-batch-processing`)
+- `fix/description` - Bug fixes (e.g., `fix/gemini-api-timeout`)
+- `docs/description` - Documentation updates (e.g., `docs/update-setup-guide`)
+- `refactor/description` - Code improvements (e.g., `refactor/modularize-rag-system`)
+- `test/description` - Adding or updating tests
 
-### Commit Guidelines
-- Use clear, descriptive commit messages
-- Follow conventional commit format
-- Keep commits focused and atomic
+### Code Standards
+- **Python PEP 8**: Follow standard Python style guidelines
+- **Type Hints**: Include type annotations for functions
+- **Docstrings**: Document all functions and classes
+- **Error Handling**: Include appropriate try-catch blocks
+- **Configuration**: Use environment variables for sensitive data
+
+### Testing Your Changes
+Before submitting a PR, ensure your changes work correctly:
+
+```bash
+# Test the complete pipeline
+python main.py
+
+# Test individual components
+python -m ocr_data_extractor.image_processor
+python -m rag.rag
+
+# Verify dependencies
+pip install -r requirements.txt
+```
+
+### What We're Looking For
+- **Performance Improvements**: Optimize OCR processing or RAG queries
+- **New Features**: Additional compliance checks or data extraction capabilities
+- **Bug Fixes**: Address issues with existing functionality
+- **Documentation**: Improve setup guides, API documentation, or code comments
+- **Testing**: Add unit tests or integration tests
+- **Error Handling**: Better error messages and recovery mechanisms
+
+For detailed contribution guidelines, see [CONTRIBUTING.md](CONTRIBUTING.md).
+
+---
 
 ## 📄 License & Legal
 
