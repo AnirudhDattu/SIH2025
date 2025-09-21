@@ -1,0 +1,28 @@
+# Legal Metrology Compliance Checker Configuration
+# Copy this file to config.yaml and update with your values
+
+# Product URL to scrape and analyze
+url: "https://example-ecommerce-site.com/product/123"
+
+# Google Cloud Document AI Configuration
+project_id: "your-gcp-project-id"
+location: "us"  # Available: us, eu, asia-northeast1
+
+# Document Parser Configuration
+doc_processor_id: "your-document-processor-id"
+doc_processor_version: "rc"  # Use "rc" for latest or specific version
+
+# Form Parser Configuration  
+form_processor_id: "your-form-processor-id"
+form_processor_version: "rc"  # Use "rc" for latest or specific version
+
+# AI Model Configuration
+gemini_model: "gemini-2.5-pro"  # Options: "gemini-2.5-pro", "gemini-2.5-flash"
+gemini_api_key_env: "GEMINI_API_KEY"
+
+# Optional: RAG System Configuration (paths relative to project root)
+rules_pdf: "rag/pdfs/Final-Book-Legal-Metrology-with-amendments.pdf"
+rules_store: "rag/rules_chroma_store"
+
+# Optional: Selenium Configuration
+selenium_headless: "1"  # Set to "1" for headless mode, "0" for GUI mode
