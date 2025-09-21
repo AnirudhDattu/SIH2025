@@ -231,12 +231,6 @@ The system validates against these key requirements:
 - ✅ **Best Before/Use By Date**
 - ✅ **Country of Origin** (for imported goods)
 
-### Validation Rules
-- **Net Quantity**: Must contain measurement units (g, kg, ml, l, etc.)
-- **MRP**: Must contain currency symbols (₹, Rs, INR)
-- **Address**: Must be complete with proper formatting
-- **Dates**: Must follow standard date formats
-
 ## 🔧 Technical Features
 
 ### AI-Powered OCR
@@ -268,43 +262,10 @@ The system validates against these key requirements:
 - No sensitive data stored in repository
 - Temporary file cleanup after processing
 
-## 🐛 Troubleshooting
-
-### Common Issues
-
-#### OCR Processing Fails
-```bash
-# Check Google Cloud credentials
-echo $GOOGLE_APPLICATION_CREDENTIALS
-# Verify Document AI API is enabled
-# Check processor IDs in config.yaml
-```
-
-#### MongoDB Connection Error
-```bash
-# Verify MongoDB URI in .env
-# Check network connectivity
-# Ensure database and collection exist
-```
-
-#### Gemini API Issues
-```bash
-# Verify API key in .env
-# Check API quota and billing
-# Review model name in config
-```
-
-#### Web Scraping Fails
-```bash
-# Check Chrome/Chromium installation
-# Verify website accessibility
-# Review URL format in config.yaml
-```
-
 ## 📈 Performance Optimization
 
 - **Batch Processing**: Multiple images processed together
-- **Vector Caching**: Legal rules stored in persistent vector database
+- **Vector Caching**: Legal rules stored in a persistent vector database
 - **Connection Pooling**: Efficient database connections
 - **Memory Management**: Temporary files cleaned automatically
 
