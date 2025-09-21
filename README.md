@@ -125,42 +125,81 @@ pip install -r requirements.txt
 - `chromadb` - Vector database for legal rules storage
 
 ### 3. Environment Configuration
-Create `.env` file with:
+Create `.env` file with your API credentials and database configuration:
 ```env
+# MongoDB Configuration
 MONGODB_URI=mongodb+srv://username:password@cluster.mongodb.net/
 MONGODB_DB=productdb
 MONGODB_COLLECTION=products
+
+# Google Gemini API
 GEMINI_API_KEY=your_gemini_api_key
+
+# Google Cloud Document AI
 GOOGLE_APPLICATION_CREDENTIALS=path/to/service-account-key.json
+
+# Optional: Logging Level
+LOG_LEVEL=INFO
 ```
 
+**Security Note:** Never commit your `.env` file to version control. It's already included in `.gitignore`.
+
 ### 4. Create Configuration File
-Create `config.yaml`:
+Create `config.yaml` with your API and processing configurations:
 ```yaml
+# Target URL for product scraping
 url: "https://example-ecommerce-site.com/product/123"
 
 # Google Cloud Document AI Configuration
 project_id: "your-gcp-project-id"
-location: "us"  # or your preferred region
+location: "us"  # or your preferred region (us, eu, asia-northeast1, etc.)
 
-# Document Parser Configuration
+# Document Parser Configuration (for text extraction)
 doc_processor_id: "your-document-processor-id"
-doc_processor_version: "your-processor-version"
+doc_processor_version: "your-processor-version"  # or "rc" for latest
 
-# Form Parser Configuration  
+# Form Parser Configuration (for structured data extraction)
 form_processor_id: "your-form-processor-id"
-form_processor_version: "your-processor-version"
+form_processor_version: "your-processor-version"  # or "rc" for latest
 
-# Gemini Configuration
-gemini_model: "gemini-2.5-flash"
-gemini_api_key_env: "GEMINI_API_KEY"
+# Gemini AI Configuration
+gemini:
+  model: "gemini-2.0-flash-exp"  # or gemini-1.5-pro for more complex tasks
+  api_key_env: "GEMINI_API_KEY"
+  max_tokens: 8192
+  temperature: 0.1  # Lower for more consistent outputs
+
+# RAG Configuration (Optional - defaults provided)
+rag:
+  chunk_size: 1000
+  chunk_overlap: 200
+  similarity_threshold: 0.7
+  max_retrieved_docs: 10
 ```
+
+**Configuration Notes:**
+- Replace placeholder values with your actual Google Cloud and API credentials
+- The `url` field should point to an e-commerce product page with clear product images
+- Use `gemini-2.0-flash-exp` for faster processing or `gemini-1.5-pro` for more accurate analysis
 
 ### 5. Setup Google Cloud Credentials
 - Create a Google Cloud service account
 - Download the JSON key file
-- Place it in your project directory
+- Place it in your project directory (outside of version control)
 - Update the path in `.env` file
+
+### 6. Initialize Vector Database (First Run)
+The RAG system requires a vector database of legal rules. This is automatically created on first run:
+
+```bash
+# The system will:
+# 1. Parse the Legal Metrology PDF document
+# 2. Create embeddings for all rules and sections
+# 3. Store them in rag/rules_chroma_store/
+# 4. This process takes a few minutes initially but speeds up subsequent runs
+```
+
+**Note:** The `rules_chroma_store` directory contains the pre-built vector database and should not be deleted.
 
 ## 🚦 Usage
 
@@ -354,11 +393,57 @@ This project is developed for Smart India Hackathon 2025. The Legal Metrology co
 
 ## 🆘 Support
 
+### Troubleshooting
+
+#### Common Setup Issues
+
+**Python Import Errors:**
+```bash
+# If you encounter module import errors, ensure virtual environment is activated
+python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+pip install -r requirements.txt
+```
+
+**Google Cloud Authentication:**
+```bash
+# Set the service account key path
+export GOOGLE_APPLICATION_CREDENTIALS="path/to/service-account-key.json"
+# Verify authentication
+gcloud auth application-default login
+```
+
+**MongoDB Connection Issues:**
+- Verify your MongoDB URI in `.env` file
+- Ensure MongoDB Atlas cluster is running and accessible
+- Check network connectivity and firewall settings
+
+**ChromeDriver Issues:**
+```bash
+# Install ChromeDriver automatically
+pip install webdriver-manager
+# Or download manually from https://chromedriver.chromium.org/
+```
+
+#### Performance Optimization Tips
+- **Batch Processing**: Process multiple images in a single run for better efficiency
+- **Vector Database**: The RAG system builds its vector database on first run - subsequent runs are faster
+- **Temporary Files**: The system automatically cleans up `temp/` files after processing
+- **Memory Management**: For large image sets, consider processing in smaller batches
+
+#### Getting Help
 For technical issues or questions:
 1. Check the troubleshooting section above
 2. Review error logs in console output
 3. Verify all configuration files are properly set up
-4. Create an issue in the repository with detailed error information
+4. Search existing [GitHub Issues](https://github.com/AnirudhDattu/SIH2025/issues)
+5. Create a new issue with detailed error information and steps to reproduce
+
+#### Contributing Help
+- Check the [CONTRIBUTING.md](CONTRIBUTING.md) for detailed guidelines
+- Look for issues labeled `good first issue` or `help wanted`
+- Join discussions in existing pull requests
+- Ask questions in issue comments before starting work
 
 ---
 
